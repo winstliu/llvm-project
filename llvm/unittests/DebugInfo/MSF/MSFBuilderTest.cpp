@@ -393,3 +393,33 @@ TEST_F(MSFBuilderTest, StreamDoesntUseFpmBlocks) {
     EXPECT_THAT(Blocks, Not(Contains(2 + I * 4096)));
   }
 }
+
+TEST_F(MSFBuilderTest, GrowthAfterFpmBoundaryDoesntUseFpmBlocks) {
+  Expected<MSFBuilder> ExpectedMsf = MSFBuilder::create(Allocator, 4096);
+  ASSERT_THAT_EXPECTED(ExpectedMsf, Succeeded());
+  auto &Msf = *ExpectedMsf;
+
+  // Grow the file so that it has 4097 blocks, making it end right before the
+  // FPM blocks of the second interval.
+  uint32_t FillBlocks = 4097 - Msf.getTotalBlockCount();
+  Expected<uint32_t> SN1 = Msf.addStream(FillBlocks * 4096);
+  ASSERT_THAT_EXPECTED(SN1, Succeeded());
+  ASSERT_EQ(4097U, Msf.getTotalBlockCount());
+
+  Expected<uint32_t> SN2 = Msf.addStream(2 * 4096);
+  ASSERT_THAT_EXPECTED(SN2, Succeeded());
+
+  auto ExpectedLayout = Msf.generateLayout();
+  ASSERT_THAT_EXPECTED(ExpectedLayout, Succeeded());
+  MSFLayout &L = *ExpectedLayout;
+  EXPECT_FALSE(L.FreePageMap.test(4097));
+  EXPECT_FALSE(L.FreePageMap.test(4098));
+
+  // The next FPM blocks should still be 4097 and 4098.
+  for (uint32_t SN : {*SN1, *SN2}) {
+    auto BlocksRef = L.StreamMap[SN];
+    std::vector<uint32_t> Blocks(BlocksRef.begin(), BlocksRef.end());
+    EXPECT_THAT(Blocks, Not(Contains(4097U)));
+    EXPECT_THAT(Blocks, Not(Contains(4098U)));
+  }
+}
